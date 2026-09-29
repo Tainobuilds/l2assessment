@@ -5,54 +5,90 @@ import Groq from 'groq-sdk';
  * Using Groq API for AI-powered categorization
  */
 
-// Initialize Groq client
-const groq = new Groq({
-  apiKey: import.meta.env.VITE_GROQ_API_KEY,
-  dangerouslyAllowBrowser: true // Required for browser-based calls (not recommended for production!)
-});
+// The only categories the rest of the app knows how to handle. The AI must
+// pick one of these; anything else becomes "Unknown" (manual review).
+export const CATEGORIES = ["Billing Issue", "Technical Problem", "Feature Request", "General Inquiry"];
+
+const SYSTEM_PROMPT = `You triage customer support messages for a small-business SaaS product.
+
+Pick exactly one category:
+- "Billing Issue": charges, refunds, invoices, payment methods, failed payments, plans, pricing, upgrades, cancellations
+- "Technical Problem": outages, errors, bugs, crashes, slowness, login or access problems, something not working
+- "Feature Request": ideas, suggestions, or requests for new or changed functionality
+- "General Inquiry": questions, feedback, compliments, or anything that fits none of the above
+
+If a message fits more than one category, choose the team that has to act first to unblock the customer.
+
+Reply with JSON only, in this exact shape:
+{"category": "<one of the four categories above>", "reasoning": "<one or two sentences explaining why>"}`;
+
+// Vite exposes the key in the browser; Node (tests, eval script) reads it from process.env
+const apiKey = import.meta.env?.VITE_GROQ_API_KEY
+  || globalThis.process?.env?.VITE_GROQ_API_KEY;
+
+// Only create the client when a key exists. Creating it without one throws
+// at page load, which blanked the whole app instead of using the fallback.
+const groq = apiKey
+  ? new Groq({
+      apiKey,
+      dangerouslyAllowBrowser: true // Required for browser-based calls (not recommended for production!)
+    })
+  : null;
+
+/**
+ * Turn the AI's raw reply into a category the app understands.
+ * Never throws: anything unexpected becomes "Unknown" so a person reviews it.
+ *
+ * @param {string} content - The raw text the AI replied with
+ * @returns {{category: string, reasoning: string}}
+ */
+export function parseCategorization(content) {
+  let parsed;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    return { category: "Unknown", reasoning: content || "The AI returned an empty reply." };
+  }
+
+  const answer = String(parsed.category ?? '').trim().toLowerCase();
+  const category = CATEGORIES.find((c) => c.toLowerCase() === answer) ?? "Unknown";
+  const reasoning = typeof parsed.reasoning === 'string' && parsed.reasoning.trim()
+    ? parsed.reasoning.trim()
+    : "No reasoning provided.";
+
+  return { category, reasoning };
+}
 
 /**
  * Categorize a customer support message using Groq AI
  * 
  * @param {string} message - The customer support message
- * @returns {Promise<{category: string, reasoning: string}>}
+ * @returns {Promise<{category: string, reasoning: string, source: "ai" | "fallback"}>}
+ *   source is "fallback" when the AI couldn't be reached and a keyword guess was used instead
  */
 export async function categorizeMessage(message) {
+  if (!groq) {
+    console.warn('No Groq API key configured, using keyword fallback');
+    return { ...getMockCategorization(message), source: "fallback" };
+  }
+
   try {
     const response = await groq.chat.completions.create({
       model: "openai/gpt-oss-120b",
       messages: [
-        {
-          role: "user",
-          content: `Categorize this customer support message: ${message}`
-        }
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: message }
       ],
-      temperature: 0.7,
+      // 0 = most predictable: the same message gets the same answer every time
+      temperature: 0,
+      // Forces the reply to be valid JSON, so it can be read reliably
+      response_format: { type: "json_object" },
     });
 
-    const content = response.choices[0].message.content;
-    
-    const lines = content.split('\n');
-    let category = "Unknown";
-    let reasoning = content;
-    
-    if (content.toLowerCase().includes('billing')) {
-      category = "Billing Issue";
-    } else if (content.toLowerCase().includes('technical') || content.toLowerCase().includes('bug')) {
-      category = "Technical Problem";
-    } else if (content.toLowerCase().includes('feature')) {
-      category = "Feature Request";
-    } else if (content.toLowerCase().includes('inquiry') || content.toLowerCase().includes('question')) {
-      category = "General Inquiry";
-    }
-    
-    return {
-      category,
-      reasoning: content
-    };
+    return { ...parseCategorization(response.choices[0].message.content), source: "ai" };
   } catch (error) {
-    console.warn('Groq API failed, using mock response:', error.message);
-    return getMockCategorization(message);
+    console.warn('Groq API failed, using keyword fallback:', error.message);
+    return { ...getMockCategorization(message), source: "fallback" };
   }
 }
 

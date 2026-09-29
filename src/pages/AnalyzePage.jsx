@@ -29,7 +29,7 @@ function AnalyzePage() {
     
     try {
       // Run categorization (LLM call)
-      const { category, reasoning } = await categorizeMessage(message)
+      const { category, reasoning, source } = await categorizeMessage(message)
       
       // Calculate urgency (rule-based)
       const urgency = calculateUrgency(message)
@@ -45,6 +45,7 @@ function AnalyzePage() {
         recommendedAction,
         escalate,
         reasoning,
+        source,
         timestamp: new Date().toISOString()
       }
 
@@ -130,6 +131,12 @@ function AnalyzePage() {
         {results && (
           <div className="bg-white rounded-lg shadow-md p-6">
             <h2 className="text-xl font-bold text-gray-900 mb-4">Analysis Results</h2>
+
+            {results.source === 'fallback' && (
+              <div className="bg-amber-50 border border-amber-300 text-amber-900 rounded-lg p-3 mb-4 text-sm">
+                <strong>AI unavailable. This category is a keyword estimate.</strong> Double-check it before acting.
+              </div>
+            )}
             
             <div className="space-y-4">
               <div>
@@ -163,7 +170,9 @@ function AnalyzePage() {
               </div>
 
               <div>
-                <div className="text-sm font-semibold text-gray-600 mb-1">AI Reasoning</div>
+                <div className="text-sm font-semibold text-gray-600 mb-1">
+                  {results.source === 'fallback' ? 'Keyword Estimate' : 'AI Reasoning'}
+                </div>
                 <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
                   <div className="prose prose-sm max-w-none text-gray-700">
                     <ReactMarkdown>
