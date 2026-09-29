@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { categorizeMessage } from '../utils/llmHelper'
 import { calculateUrgency } from '../utils/urgencyScorer'
-import { getRecommendedAction } from '../utils/templates'
+import { getRecommendedAction, shouldEscalate } from '../utils/templates'
 
 function AnalyzePage() {
   const [message, setMessage] = useState('')
@@ -35,13 +35,15 @@ function AnalyzePage() {
       const urgency = calculateUrgency(message)
       
       // Get recommended action (template-based)
-      const recommendedAction = getRecommendedAction(category)
-      
+      const recommendedAction = getRecommendedAction(category, urgency)
+      const escalate = shouldEscalate(category, urgency)
+
       const analysisResult = {
         message,
         category,
         urgency,
         recommendedAction,
+        escalate,
         reasoning,
         timestamp: new Date().toISOString()
       }
@@ -150,6 +152,11 @@ function AnalyzePage() {
 
               <div>
                 <div className="text-sm font-semibold text-gray-600 mb-1">Recommended Action</div>
+                {results.escalate && (
+                  <div className="inline-block bg-red-600 text-white text-sm font-semibold px-3 py-1 rounded-lg mb-2">
+                    ⚠ Escalate now
+                  </div>
+                )}
                 <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
                   <p className="text-gray-800">{results.recommendedAction}</p>
                 </div>
